@@ -21,6 +21,8 @@ class Router implements Bootable, Middleware, ServerObserver {
     private $routeDispatcher;
     private $routes = [];
     private $actions = [];
+    private $afters = [];
+    private $befores = []; // includes existing actions
     private $cache = [];
     private $cacheEntryCount = 0;
     private $maxCacheEntries = 512;
@@ -161,12 +163,56 @@ class Router implements Bootable, Middleware, ServerObserver {
                 $route[2] = array_merge($this->actions, $route[2]);
                 $this->routes[] = $route;
                 $this->actions = array_merge($this->actions, $action->actions);
+                $this->befores = array_merge($this->befores, $action->actions);
             }
         } else {
             $this->actions[] = $action;
+            $this->befores[] = $action;
             foreach ($this->routes as &$route) {
                 $route[2][] = $action;
             }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Attach a callable, Middleware or Bootable before every route of THIS router.
+     *
+     * @param callable|\Aerys\Middleware|\Aerys\Bootable $action
+     * @return self
+     */
+    public function before($action) {
+        if (!(is_callable($action) || $action instanceof Middleware || $action instanceof Bootable)) {
+            throw new \InvalidArgumentException(
+                __METHOD__ . " requires a callable action or Middleware instance"
+            );
+        }
+
+        array_unshift($this->befores, $action);
+        foreach ($this->routes as &$route) {
+            array_unshift($route[2], $action);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Attach a callable, Middleware or Bootable after every route of THIS router.
+     *
+     * @param callable|\Aerys\Middleware|\Aerys\Bootable $action
+     * @return self
+     */
+    public function after($action) {
+        if (!(is_callable($action) || $action instanceof Middleware || $action instanceof Bootable)) {
+            throw new \InvalidArgumentException(
+                __METHOD__ . " requires a callable action or Middleware instance"
+            );
+        }
+
+        $this->afters[] = $action;
+        foreach ($this->routes as &$route) {
+            $route[2][] = $action;
         }
 
         return $this;
@@ -264,7 +310,7 @@ class Router implements Bootable, Middleware, ServerObserver {
             );
         }
 
-        $actions = array_merge($this->actions, $actions);
+        $actions = array_merge($this->befores, $actions, $this->afters);
 
         $uri = "/" . ltrim($uri, "/");
         if (substr($uri, -2) === "/?") {
